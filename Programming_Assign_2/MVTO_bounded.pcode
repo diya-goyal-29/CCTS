@@ -1,0 +1,119 @@
+int k = 5 // number of versions that can be made
+std::atomic<int> counter{0};
+
+class data_head{
+    data_item* next;
+    std::mutex lock;
+    int count = 0;
+};
+
+class data_item{
+    data_item* next = NULL;
+    int value = 0;
+    int id;
+    std::vector<int> read_list;
+};
+
+class transaction{
+    int id;
+    map <pair<data_head*,data_item*>, int> local_read_set;
+    map <data_head*, int> local_write_set;
+    char status;
+};
+
+transaction* begin(){
+    transaction* t = new transaction();
+    t->id = counter.fetch_add(1); //atomic counter
+    t->status = 'l';
+    return t;
+}
+
+int read(transaction* t, data_head *x){
+    int value = -1;
+    if(t->status != 'a'){
+        x->lock.lock();
+        data_item* cur = x->next;
+        data_item* previous = cur;
+        int flag = 0;
+        while(cur->id < t->id){
+            flag = 1;
+            previous = cur;
+            cur = cur->next;
+        }
+        if(flag){
+            value = previous->value;
+            t->local_read_set[{x , previous}] = value;
+            previous->read_list.push_back(t->id);
+        } else {
+            t->status = 'a';
+        }
+        x->lock.unlock();
+    }
+    return value;
+}
+
+void write(transaction* t, data_head* x, int value){
+    t->local_write_set[x] = value;
+}
+
+char tryCommit(transaction* t) {
+    if(t->status == 'a') {
+        delete t;
+        return 'a';
+    }
+
+    flag = 1;
+    for(map<data_head*, value>::iterator it=local_write_set.begin(); it!=local_write_set.end(); ++it) {
+        it.first.lock.lock();
+        data_item* cur = it.first->next;
+        while(cur->id < t->id) {
+            for(auto i : cur->read_list){
+                if(i > t->id){
+                    flag = 0;
+                    break;
+                }
+            }
+            cur = cur->next;
+        }
+    }
+    if(flag){
+        for(map<data_head*, value>::iterator it=local_write_set.begin(); it!=local_write_set.end(); ++it){
+                cur = it.first->next;
+                while(cur->next != NULL){
+                    cur = cur->next;
+                }
+                data_item *data = new data_item();
+                cur->next = data;
+                data.value = it.second;
+                data.id = t->id;
+                if(it.first->count < k) {
+                    it.first->count++;
+                } else {
+                    cur = it.first->next->next;
+                    data_item *previous = it.first->next;
+                    it.first->next = cur;
+                    delete previous;
+                }
+                it.first.lock.unlock();
+        }
+        delete t;
+        return 'c';
+    }
+    else {
+        for(map<pair<data_head*, data_item*>, value>::iterator it=local_read_set.begin(); it!=local_read_set.end(); ++it) {
+            if(local_write_set.find(it.first.first) != local_write_set.end()){
+                it.first.first.lock.lock();
+            }
+            it.first.second.read_list.erase(it.first.second.read_list.find(t->id));
+            if(local_write_set.find(it.first.first) != local_write_set.end()){
+                it.first.first.lock.unlock();
+            }
+        }
+        for(map<data_head*, value>::iterator it=local_write_set.begin(); it!=local_write_set.end(); ++it){
+            it.first.lock.unlock();
+        }
+        delete t;
+        return 'a';
+    }
+
+}

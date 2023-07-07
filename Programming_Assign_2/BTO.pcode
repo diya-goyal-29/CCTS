@@ -1,0 +1,74 @@
+std::atomic<int> counter{0};
+
+class data_item{
+    std::mutex lock;
+    int value = 0;
+    int max_read = -1;
+    int max_write = -1;
+};
+
+class transaction{
+    int id;
+    map <data_item*, int> local_write_set;
+    t->status = 'l';
+};
+
+transaction* begin(){
+    transaction* t = new transaction();
+    t->id = counter.fetch_add(1); //atomic counter
+    t->status = 'l';
+    return t;
+}
+
+int read(transaction* t, data_item* x) {
+    int value = -1;
+    if(t->status != 'a'){
+        x->lock.lock();
+        if(x->max_write < t->id){
+            value = x->value;
+            x->max_read = t->id;
+        } else{
+            t->status = 'a';
+        }
+        x->lock.unlock();
+    }
+    return value;
+}
+
+void write(transaction* t, data_item* x, int value){
+    t->local_write_set[x] = value;
+}
+
+char tryCommit(transaction* t) {
+    if(t->status == 'a') {
+        delete t;
+        return 'a';
+    }
+    int flag = 0;
+    for(std::map<data_item*, int>::iterator it = t->local_write_set.begin(); it != t->local_write_set.end(); ++it){
+        auto cur = it->first;
+        cur->lock.lock();
+        if(cur->max_read < t->id && cur->max_write < t->id) {
+            flag = 1;
+        } else {
+            flag = 0;
+        }
+    }
+    if(flag) {
+        for(std::map<data_item*, int>::iterator it = t->local_write_set.begin(); it != t->local_write_set.end(); ++it) {
+            auto cur = it->first;
+            int val = it->second;
+            cur->value = val;
+            cur->max_write = t->id;
+            cur->lock.unlock();
+        }
+        delete t;
+        return 'c';
+    } else {
+        for(std::map<data_item*, int>::iterator it = t->local_write_set.begin(); it != lt->ocal_write_set.end(); ++it) {
+            it->first->lock.unlock();
+        }
+        delete t;
+        return 'a';
+    }
+}
